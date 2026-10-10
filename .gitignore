@@ -1,0 +1,27 @@
+# Presentation building and output -- not part of the technical artifact
+.deck_build/
+*.pptx
+*.ppt
+
+# Documents (assignment PDFs, briefs, Word docs) -- not part of the technical artifact
+*.pdf
+*.docx
+*.doc
+
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# Node
+node_modules/
+package-lock.json
+
+# Generated/local run artifacts
+starter-kit/data/processed/
+starter-kit/models/artifacts/
+starter-kit/reports/
+
+# Editor/tooling
+.claude/
