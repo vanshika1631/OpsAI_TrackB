@@ -64,14 +64,14 @@ services:
     ports:
       - "8000:8000"
     environment:
-      MODEL_PATH: /app/models/artifact/model.pkl
+      MODEL_PATH: /app/models/artifacts/model.pkl
     volumes:
       - ../models/artifacts:/app/models/artifacts:ro
     depends_on:
       broker:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
       interval: 10s
       timeout: 5s
       retries: 5

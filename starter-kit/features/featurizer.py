@@ -192,8 +192,9 @@ class _ParquetAppender:
 
     Tradeoff: the file's footer is only written on close(). A hard kill
     (SIGKILL, power loss, a forced TerminateProcess) bypasses all signal
-    handlers and leaves an unreadable file, whereas the old read-rewrite
-    approach left a valid file after every flush. Graceful exit paths
+    handlers and leaves an unreadable file. The old read-rewrite approach
+    left a valid file after each completed flush, but was not crash-safe
+    during an in-place rewrite. Graceful exit paths
     (max_messages, SIGTERM/SIGINT/SIGBREAK via _install_signal_handlers)
     are covered via the caller's try/finally.
     """

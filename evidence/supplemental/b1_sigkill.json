@@ -1,0 +1,22 @@
+[
+  {
+    "mode": "rewrite",
+    "signal": "SIGKILL (kill -9)",
+    "returncode": -9,
+    "rows_in_completed_append_calls": 1000,
+    "rows_readable_normally": 1000,
+    "rows_unavailable_normally": 0,
+    "reader_error": null,
+    "scope": "writer checkpoint; no Kafka offsets committed by this harness"
+  },
+  {
+    "mode": "append",
+    "signal": "SIGKILL (kill -9)",
+    "returncode": -9,
+    "rows_in_completed_append_calls": 1000,
+    "rows_readable_normally": 0,
+    "rows_unavailable_normally": 1000,
+    "reader_error": "Could not open Parquet input source '/tmp/tmp_um4y4yp/append.parquet': Parquet magic bytes not found in footer. Either the file is corrupted or this is not a parquet file.",
+    "scope": "writer checkpoint; no Kafka offsets committed by this harness"
+  }
+]

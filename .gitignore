@@ -10,6 +10,7 @@
 
 # Python
 venv/
+.venv/
 __pycache__/
 *.pyc
 .env
@@ -25,3 +26,8 @@ starter-kit/reports/
 
 # Editor/tooling
 .claude/
+
+# Keep final deliverables, exclude bulky regenerated experiment files.
+!submission/*.pdf
+evidence/supplemental/stream_files*/
+submission/rendered/

@@ -1,0 +1,76 @@
+## captured_at: 2026-09-25T21:37:51Z
+## docker compose -f docker/docker-compose.b2-challenge.yaml -f docker/docker-compose.fault-bad-model-path.yaml ps
+NAME      IMAGE                           STATUS
+broker    apache/kafka:latest             Up 5 minutes (healthy)
+mlflow    ghcr.io/mlflow/mlflow:v2.14.1   Up 5 minutes (healthy)
+scorer    docker-scorer                   Up About a minute (unhealthy)
+
+## scorer health state (docker inspect .State.Health, last 2 probes)
+{
+  "Status": "unhealthy",
+  "FailingStreak": 9,
+  "Log": [
+    {
+      "Start": "2026-09-25T21:37:39.7208995Z",
+      "End": "2026-09-25T21:37:39.828519817Z",
+      "ExitCode": 1,
+      "Output": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 216, in urlopen\n    return opener.open(url, data, timeout)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 525, in open\n    response = meth(req, response)\n               ^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 634, in http_response\n    response = self.parent.error(\n               ^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 563, in error\n    return self._call_chain(*args)\n           ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 496, in _call_chain\n    result = func(*args)\n             ^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 643, in http_error_default\n    raise HTTPError(req.full_url, code, msg, hdrs, fp)\nurllib.error.HTTPError: HTTP Error 503: SERVICE UNAVAILABLE\n"
+    },
+    {
+      "Start": "2026-09-25T21:37:49.846346452Z",
+      "End": "2026-09-25T21:37:49.938513231Z",
+      "ExitCode": 1,
+      "Output": "Traceback (most recent call last):\n  File \"<string>\", line 1, in <module>\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 216, in urlopen\n    return opener.open(url, data, timeout)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 525, in open\n    response = meth(req, response)\n               ^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 634, in http_response\n    response = self.parent.error(\n               ^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 563, in error\n    return self._call_chain(*args)\n           ^^^^^^^^^^^^^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 496, in _call_chain\n    result = func(*args)\n             ^^^^^^^^^^^\n  File \"/usr/local/lib/python3.11/urllib/request.py\", line 643, in http_error_default\n    raise HTTPError(req.full_url, code, msg, hdrs, fp)\nurllib.error.HTTPError: HTTP Error 503: SERVICE UNAVAILABLE\n"
+    }
+  ]
+}
+
+## scorer healthcheck command
+["CMD-SHELL","python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
+
+## scorer effective env + mounts
+MODEL_PATH=/app/models/artifact/model.pkl
+PORT=8000
+C:\Hritwik\CMU\Sem 3\Fundamentals of Operationalizing AI\Group Project\starter-kit\models\artifacts -> /app/models/artifacts (rw=false)
+
+## files visible inside container under /app/models
+/app/models:
+artifacts
+
+/app/models/artifacts:
+model.pkl
+
+## GET /health
+{"model_loaded":false,"status":"ok"}
+
+HTTP 200
+
+## GET /ready
+{"model_path":"/app/models/artifact/model.pkl","ready":false,"reason":"model not loaded from /app/models/artifact/model.pkl: FileNotFoundError: [Errno 2] No such file or directory: '/app/models/artifact/model.pkl'"}
+
+HTTP 503
+
+## POST /score
+{"error":"model not loaded"}
+
+HTTP 503
+
+## scorer logs (tail)
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8000
+ * Running on http://172.18.0.4:8000
+[33mPress CTRL+C to quit[0m
+172.18.0.1 - - [25/Sep/2026 21:36:29] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:36:39] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:36:50] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:00] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:10] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:20] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:31] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:41] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+172.18.0.1 - - [25/Sep/2026 21:37:52] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+
+## scorer restarts
+RestartCount=0 StartedAt=2026-09-25T21:36:18.820440918Z
