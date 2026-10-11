@@ -1,0 +1,74 @@
+## captured_at: 2026-09-25T21:33:38Z
+## docker compose -f docker/docker-compose.b2-challenge.yaml ps
+NAME      IMAGE                           STATUS
+broker    apache/kafka:latest             Up 52 seconds (healthy)
+mlflow    ghcr.io/mlflow/mlflow:v2.14.1   Up 52 seconds (healthy)
+scorer    docker-scorer                   Up 45 seconds (healthy)
+
+## scorer health state (docker inspect .State.Health, last 2 probes)
+{
+  "Status": "healthy",
+  "FailingStreak": 0,
+  "Log": [
+    {
+      "Start": "2026-09-25T21:33:28.315366052Z",
+      "End": "2026-09-25T21:33:28.411440222Z",
+      "ExitCode": 0,
+      "Output": ""
+    },
+    {
+      "Start": "2026-09-25T21:33:38.411754965Z",
+      "End": "2026-09-25T21:33:38.52903553Z",
+      "ExitCode": 0,
+      "Output": ""
+    }
+  ]
+}
+
+## scorer healthcheck command
+["CMD-SHELL","python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\""]
+
+## scorer effective env + mounts
+MODEL_PATH=/app/models/artifact/model.pkl
+PORT=8000
+C:\Hritwik\CMU\Sem 3\Fundamentals of Operationalizing AI\Group Project\starter-kit\models\artifacts -> /app/models/artifacts (rw=false)
+
+## files visible inside container under /app/models
+/app/models:
+artifacts
+
+/app/models/artifacts:
+model.pkl
+
+## GET /health
+{"model_loaded":false,"status":"ok"}
+
+HTTP 200
+
+## GET /ready
+<!doctype html>
+<html lang=en>
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.</p>
+
+HTTP 404
+
+## POST /score
+{"error":"model not loaded"}
+
+HTTP 503
+
+## scorer logs (tail)
+[score_service] WARNING: no model found at /app/models/artifact/model.pkl. Run models/train_baseline.py first. Starting anyway (health check will report model_loaded=false).
+ * Serving Flask app 'score_service'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8000
+ * Running on http://172.18.0.4:8000
+[33mPress CTRL+C to quit[0m
+172.18.0.1 - - [25/Sep/2026 21:33:39] "[35m[1mPOST /score HTTP/1.1[0m" 503 -
+
+## scorer restarts
+RestartCount=0 StartedAt=2026-09-25T21:32:52.847478519Z

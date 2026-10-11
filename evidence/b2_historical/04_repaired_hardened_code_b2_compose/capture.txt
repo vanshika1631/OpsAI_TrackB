@@ -1,0 +1,70 @@
+## captured_at: 2026-09-25T21:36:04Z
+## docker compose -f docker/docker-compose.b2-challenge.yaml ps
+NAME      IMAGE                           STATUS
+broker    apache/kafka:latest             Up 3 minutes (healthy)
+mlflow    ghcr.io/mlflow/mlflow:v2.14.1   Up 3 minutes (healthy)
+scorer    docker-scorer                   Up 30 seconds (healthy)
+
+## scorer health state (docker inspect .State.Health, last 2 probes)
+{
+  "Status": "healthy",
+  "FailingStreak": 0,
+  "Log": [
+    {
+      "Start": "2026-09-25T21:35:49.716003097Z",
+      "End": "2026-09-25T21:35:49.803790201Z",
+      "ExitCode": 0,
+      "Output": ""
+    },
+    {
+      "Start": "2026-09-25T21:35:59.80498562Z",
+      "End": "2026-09-25T21:35:59.903226115Z",
+      "ExitCode": 0,
+      "Output": ""
+    }
+  ]
+}
+
+## scorer healthcheck command
+["CMD-SHELL","python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/ready')\""]
+
+## scorer effective env + mounts
+MODEL_PATH=/app/models/artifacts/model.pkl
+PORT=8000
+C:\Hritwik\CMU\Sem 3\Fundamentals of Operationalizing AI\Group Project\starter-kit\models\artifacts -> /app/models/artifacts (rw=false)
+
+## files visible inside container under /app/models
+/app/models:
+artifacts
+
+/app/models/artifacts:
+model.pkl
+
+## GET /health
+{"model_loaded":true,"status":"ok"}
+
+HTTP 200
+
+## GET /ready
+{"model_path":"/app/models/artifacts/model.pkl","ready":true,"reason":"canary prediction ok"}
+
+HTTP 200
+
+## POST /score
+{"score":3.9885240626519465e-11,"spike":false}
+
+HTTP 200
+
+## scorer logs (tail)
+[score_service] loaded model from /app/models/artifacts/model.pkl
+ * Serving Flask app 'score_service'
+ * Debug mode: off
+[31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on all addresses (0.0.0.0)
+ * Running on http://127.0.0.1:8000
+ * Running on http://172.18.0.4:8000
+[33mPress CTRL+C to quit[0m
+172.18.0.1 - - [25/Sep/2026 21:36:05] "POST /score HTTP/1.1" 200 -
+
+## scorer restarts
+RestartCount=0 StartedAt=2026-09-25T21:35:34.40582496Z

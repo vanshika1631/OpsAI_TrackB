@@ -1,0 +1,6 @@
+## captured_at: 2026-09-25T21:39:16.326363Z
+## client-side latency from host, 300 sequential requests each after 20 warm-up (ms)
+endpoint     status     p50     p95     max
+GET /health     200    3.50    5.51    7.23
+GET /ready      200    4.65    6.03    8.33
+POST /score     200    4.43    5.63    9.86

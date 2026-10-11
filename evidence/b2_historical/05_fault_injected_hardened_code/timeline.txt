@@ -1,0 +1,11 @@
+## status timeline after starting hardened scorer with bad MODEL_PATH
+t(s)  docker_health  failing_streak  /health  /ready  /score
+0    starting  0    000    000    000
+10    starting  1    200    503    503
+20    starting  2    200    503    503
+30    starting  3    200    503    503
+40    starting  4    200    503    503
+50    unhealthy  5    200    503    503
+60    unhealthy  6    200    503    503
+70    unhealthy  7    200    503    503
+80    unhealthy  8    200    503    503

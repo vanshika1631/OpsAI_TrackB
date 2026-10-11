@@ -1,0 +1,21 @@
+## captured_at: 2026-09-25T21:38:21Z
+## Model artifact present at the configured path but corrupt (not a valid pickle).
+
+### original score_service.py
+container state: exited exit=1
+logs:
+  File "/app/scoring/score_service.py", line 59, in <module>
+  File "/app/scoring/score_service.py", line 30, in load_model
+_pickle.UnpicklingError: could not find MARK
+/health ->  HTTP 000
+/ready  ->  HTTP 000
+
+### hardened score_service.py
+container state: running exit=0
+logs:
+[score_service] ERROR: could not load model from /app/models/artifacts/model.pkl (UnpicklingError: could not find MARK). Starting anyway; /health (liveness) will pass but /ready will return 503 until this is fixed.
+ * Serving Flask app 'score_service'
+/health -> {"model_loaded":false,"status":"ok"}
+ HTTP 200
+/ready  -> {"model_path":"/app/models/artifacts/model.pkl","ready":false,"reason":"model not loaded from /app/models/artifacts/model.pkl: UnpicklingError: could not find MARK"}
+ HTTP 503

@@ -1,0 +1,9 @@
+# Fault-injection override for the B2 validation experiment.
+# Re-introduces the original misconfigured MODEL_PATH on top of a base stack:
+#   docker compose -f docker/docker-compose.b2-challenge.yaml -f docker/docker-compose.fault-bad-model-path.yaml up -d --build
+# Expected: /health 200 (process alive), /ready 503, scorer reported "unhealthy".
+
+services:
+  scorer:
+    environment:
+      MODEL_PATH: /app/models/artifact/model.pkl

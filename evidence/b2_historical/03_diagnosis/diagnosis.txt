@@ -1,0 +1,32 @@
+## captured_at: 2026-09-25T21:33:53Z
+## Test A: restart the broken scorer 3 times -- does restarting fix it?
+restart 1: logs-> [score_service] WARNING: no model found at /app/models/artifact/model.pkl. Run m
+   /health -> {"model_loaded":false,"status":"ok"}
+ HTTP 200   /score -> {"error":"model not loaded"}
+ HTTP 503
+restart 2: logs-> [score_service] WARNING: no model found at /app/models/artifact/model.pkl. Run m
+   /health -> {"model_loaded":false,"status":"ok"}
+ HTTP 200   /score -> {"error":"model not loaded"}
+ HTTP 503
+restart 3: logs-> [score_service] WARNING: no model found at /app/models/artifact/model.pkl. Run m
+   /health -> {"model_loaded":false,"status":"ok"}
+ HTTP 200   /score -> {"error":"model not loaded"}
+ HTTP 503
+docker status after restarts: healthy
+
+## Test B: inside the container, does the configured path exist vs the mounted path?
+MODEL_PATH = /app/models/artifact/model.pkl exists = False
+/app/models/artifacts/model.pkl exists = True
+
+## Test C (falsification): same image, same volume, only MODEL_PATH overridden to the mounted path
+[score_service] loaded model from /app/models/artifacts/model.pkl
+/health -> {"model_loaded":true,"status":"ok"}
+ HTTP 200
+/score  -> {"score":3.9885240626519465e-11,"spike":false}
+ HTTP 200
+
+## Test D: diff default compose vs B2 compose
+67c67
+<       MODEL_PATH: /app/models/artifact/model.pkl
+---
+>       MODEL_PATH: /app/models/artifacts/model.pkl
