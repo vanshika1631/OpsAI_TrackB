@@ -1,25 +1,25 @@
-# Problem, hypothesis and controlled diagnosis
+# Our problem and approach
 
-When 'healthy' is not enough
+Track B final project report
 
 Vanshika Tiwari | Harshid Bhinde | Hritwik Ekade  
 94-879 Fundamentals of Operationalizing AI | Track B | October 10, 2026
 
-Decision: ship B2's path repair and readiness check; use B1's append writer only for controlled, replayable runs until durability is addressed; in B3, alert and investigate rather than automatically retrain. These are distinct operational failures: falling behind, being unable to score, and serving changed inputs.
+We recommend using B2's corrected model path and readiness check. B1's append fix is faster, but we would only use it for tests where the input can be replayed until its crash-recovery problem is fixed. For B3, we recommend investigating the drift before deciding whether to retrain. Each challenge shows a different way the system can look healthy while something is wrong.
 
-## System and evidence boundary
+## The system and the evidence we kept
 
-Recorded ticks enter Kafka, become rolling features, persist to Parquet, and feed a model exposed through an API. Our presentation examined B1, B2 and B3. This brief supplements it with controlled measurements. B2's September 25 captures survive. Original B1 logs and the original B3 model/script do not; their numerical results are not treated as verified final evidence.
+The system sends recorded market ticks through Kafka, calculates rolling features, saves them in Parquet, and serves model predictions through an API. We covered B1, B2 and B3 in our presentation. After the feedback, we added the tests in this report. We still have the September 25 B2 logs, but not the original B1 logs or B3 model and script. We use new measurements where we could not verify the old ones.
 
-## B1: hypothesis and falsification
+## B1: what we thought was causing the lag
 
-The initial hypothesis was that more partitions and consumers would remove growing lag; unchanged lag would falsify it. The presentation reported that falsification. The producer's constant BTC-USD key explains why the added consumers could remain idle: one key is routed to one partition. We did not repeat the historical partition comparison and do not claim to recover its measurements.
+We first thought adding partitions and consumers would reduce lag. We said we would reject this idea if lag kept growing at the same rate. Our presentation reported that result. The producer uses the same BTC-USD key for every message, so all messages go to one partition and the extra consumers can sit idle. We did not repeat that partition experiment for this report, and its original logs are unavailable.
 
-The replacement hypothesis is that reading and rewriting all prior rows every 25 features makes storage cost grow with accumulated data. If save time stays flat as existing row count increases, or the append change fails under equivalent load, this diagnosis weakens. Rewriting successively larger files entails quadratic cumulative row-serialization work; a throughput decline over time alone cannot establish the cause.
+Our next hypothesis was that rewriting the full Parquet file every 25 feature rows was slowing the consumer down. If save time did not increase with the rows already on disk, or append did not help under the same load, we would question this explanation. The code repeatedly serializes all earlier rows, giving quadratic total work as the file grows. A drop in throughput during one run was not enough to isolate that cause.
 
-## Controlled save test
+## Testing save time at different file sizes
 
-Seven randomized trials per writer and file size; identical 25-row additions, schema, host and storage. Seed-file creation is outside the timer. Existing rows vary independently of elapsed run time. Append footer closure is outside its save timer: the operations have different durability guarantees.
+We ran seven trials for each writer and file size, in random order. Each trial added the same 25 rows using the same schema, computer and storage. We prepared the existing file before starting the timer, so we could vary file size without relying on how long the run had been going. The append timing does not include closing its footer, which is an important difference in durability.
 
 | Rows already stored | Rewrite median (ms) | Append median (ms) |
 | --- | --- | --- |
@@ -28,18 +28,18 @@ Seven randomized trials per writer and file size; identical 25-row additions, sc
 | 20,000 | 26.93 | 1.01 |
 | 80,000 | 46.44 | 1.15 |
 
-Rewrite cost rises with stored rows while open-writer append cost is nearly flat after initialization. This supports the code-based mechanism, not a fitted asymptotic timing law. Measurements are warm-cache and do not include fsync or power-failure testing.
+The rewrite took longer as the stored row count increased. After initialization, append time stayed close to 1 ms. This supports our explanation of the code, although the timings alone do not prove an asymptotic growth rate. These tests used a warm cache and did not test fsync or power loss.
 
 Evidence: b1_save_trials.csv (56 trials); b1_save_summary.csv; supplied baseline _append_parquet and submitted _ParquetAppender.
 
 
 <!-- page break -->
 
-# B1: measured improvement, bounded recommendation
+# B1: results and the crash problem
 
-## Equivalent finite replay, repeated three times
+## Repeating the same workload
 
-Each run starts with a unique empty topic and group, one partition/consumer, and a fresh output file. The same 14,076 raw messages yield 11,754 features; non-ticker messages do not produce rows. Input timestamps have zero backward steps. Replay is finite, never looped. Run order alternates; final timing runs were collected without concurrent benchmark/bootstrap work.
+For each run, we used a new empty topic and consumer group, one partition, one consumer and a fresh output file. We replayed the same 14,076 messages once, without looping. They produced 11,754 feature rows because non-ticker messages were skipped. Timestamps never moved backward. We tested each writer three times, alternated the order, and ran the final timings without other benchmarks or bootstrap calculations running.
 
 [Lag chart: all six runs, shared axes; see PDF and b1_stream_telemetry.csv.]
 
@@ -52,30 +52,30 @@ Each run starts with a unique empty topic and group, one partition/consumer, and
 | Final sampled lag | 0 in all runs | 0 in all runs |
 | Exact feature-row equality | 11,754 / 11,754 | 11,754 / 11,754 |
 
-Achieved rate uses acknowledged delivery count divided by producer elapsed time, including final flush. Lag is sampled about every second; completion times include observation delay. Every output column and row matches a direct single-pass calculation exactly. This supports the bounded finite-load improvement, not a multi-hour capacity claim.
+We calculated the arrival rate from acknowledged messages divided by producer time, including the final flush. We sampled lag about once a second, so completion times include some observation delay. Every output row and column matched the direct single-pass calculation exactly. This shows an improvement on this finite workload; it does not tell us the capacity over several hours.
 
-## Hard kill reverses an unconditional ship recommendation
+## What happened when we used kill -9
 
-A Linux SIGKILL after 40 completed 25-row writes leaves 1,000/1,000 rows readable for rewrite and 0/1,000 normally readable for append. The open file lacks its footer: all 1,000 rows are unavailable to standard PyArrow reads, not just the last row group. This writer-only test performs no Kafka commits; it does not measure end-to-end recovery loss. Production code commits after appends, so unreadable committed output is a real risk.
+We sent Linux SIGKILL after 40 completed batches of 25 rows. The rewrite file still had 1,000 readable rows, but the append file had zero rows readable by PyArrow because its footer was missing. This affected the whole open file, not just the last row group. This test only checked the writer and did not commit Kafka offsets. The actual consumer commits after appending, so it could commit offsets for output that becomes unreadable after a crash.
 
-Keep the SIGTERM/SIGINT close handler, but do not equate graceful closure with crash durability. The old in-place rewrite is also vulnerable if killed during a write. Use append only with retained replayable inputs and fresh output paths; durable closed segments and offset/data recovery must be validated before production.
+We would keep the SIGTERM/SIGINT handler because it closes the writer during a normal shutdown. It cannot help with SIGKILL. The old rewrite method can also corrupt a file if it is killed during a write. For now, we recommend append only when the input is retained and can be replayed, with a new output path each time. Durable file segments and recovery of data and offsets still need to be tested.
 
 Evidence: b1_stream_summary.csv; b1_stream_telemetry.csv and six logs; b1_sigkill.json. Original 73,607 lag and 3,000/s achieved-rate claims are withdrawn: looping or pre-existing backlog cannot be distinguished without the missing logs.
 
 
 <!-- page break -->
 
-# B2: make deployment health agree with scoring
+# B2: fixing the model path and health check
 
-## Diagnosis and controlled causal test
+## Finding the cause
 
-The supplied B2 configuration points MODEL_PATH to /app/models/artifact/model.pkl, while the mounted directory is artifacts. The original process catches a missing file and stays alive. Docker probes /health and sees HTTP 200 even when /score returns 503. This is both a configuration defect and a detection defect.
+We found that MODEL_PATH used /app/models/artifact/model.pkl, but the mounted folder was named artifacts. The original scorer caught the missing-file error and kept running. Docker checked /health, which returned 200 even when /score returned 503. The wrong path caused the scoring failure, and the health check failed to detect it.
 
-Hypothesis: changing only MODEL_PATH, keeping image, mount and scoring payload constant, restores scoring. A continued 503 would reject that explanation. Historical captures show the configured path absent, the mounted file present, and the path-only override restoring HTTP 200 and the baseline score. Three restarts with the wrong path all reproduced the fault; restarting is not the repair.
+Our hypothesis was that correcting only MODEL_PATH would restore scoring with the same image, volume and request payload. If scoring still returned 503, the path would not explain the failure. The saved logs show that the configured path did not exist, the mounted model did exist, and changing only the path restored HTTP 200 and the baseline score. Restarting three times with the wrong path did not fix it.
 
-## Intervention
+## What we changed
 
-Repair the model path. Keep /health as a cheap liveness response. Add /ready: require a loaded model, run a canary through the same predict function as /score, and require a finite probability in [0,1]. Return HTTP 503 with a diagnostic reason on failure. Point Docker's healthcheck to /ready. Model-load exceptions are surfaced as unready instead of silently looking usable.
+We corrected the model path and kept /health as a simple check that the process is responding. We added /ready to check that the model is loaded and run a canary through the same predict function as /score. It only returns 200 if the prediction is finite and between 0 and 1. Otherwise, it returns 503 and explains the failure. Docker now checks /ready, so a model-loading failure no longer looks healthy.
 
 | Controlled condition | Docker | /health | /ready | /score |
 | --- | --- | --- | --- | --- |
@@ -83,32 +83,32 @@ Repair the model path. Keep /health as a cheap liveness response. Add /ready: re
 | Repaired + hardened | healthy | 200 | 200 | 200 |
 | Hardened + bad path | unhealthy | 200 | 503 | 503 |
 
-The historical probe timeline was sampled every 10 seconds: starting at 0-40 seconds and unhealthy at 50 seconds after five failed probes. Liveness remained 200 after startup. A corrupt artifact made the original process exit with code 1; the hardened service stayed up and exposed UnpicklingError through readiness.
+In the saved test, we checked Docker's status every 10 seconds. It showed starting from 0 to 40 seconds, then unhealthy at 50 seconds after five failed probes. /health stayed at 200 after startup. We also tested a corrupt model: the original scorer exited with code 1, while the updated scorer stayed up and reported UnpicklingError through /ready.
 
-## Cost and verification
+## Checking the result and probe cost
 
-Historical host-side latency: 300 sequential requests per endpoint after 20 warm-ups. /health p50 3.50 ms, p95 5.51 ms; /ready p50 4.65 ms, p95 6.03 ms. Median difference is 1.15 ms. These are local, sequential probes, not a concurrency benchmark; raw individual timings are unavailable.
+The earlier latency test used 300 sequential requests per endpoint after 20 warm-ups. /health had p50 3.50 ms and p95 5.51 ms; /ready had p50 4.65 ms and p95 6.03 ms. The median difference was 1.15 ms. These were local sequential requests, so they do not show the cost under concurrent load. We have the summary, but not the individual timings.
 
-The final repository includes the previously local hardened scorer and repaired compose files. Supplemental Flask test-client checks with the newly generated model confirm health/ready/score = 200/200/200 for a valid artifact and 200/503/503 for missing and corrupt artifacts. These are application-level regression checks, not a new Docker timing run.
+We added the locally tested scorer and corrected Compose files to the final repository. Using Flask's test client and the new model, we checked /health, /ready and /score again. They returned 200/200/200 with a valid model and 200/503/503 with missing or corrupt models. These new checks test the application; they are not a repeat of the Docker timing experiment.
 
-## Deployment recommendation and limits
+## What we recommend and what is still untested
 
-Ship both changes. In Compose, unhealthy is a status label: it does not remove traffic or restart the container. A stale canary could mark all replicas unready, and a runnable but wrong model can pass. Monitor ready replicas, caller 5xx, load errors and time-to-ready. Test traffic gating and failed rollouts separately before claiming Kubernetes reliability.
+We recommend both changes. In Compose, unhealthy is just a status label; it does not stop traffic or restart the container. A canary with outdated inputs could mark every replica unready, and a working but incorrect model could still pass. We would monitor ready replicas, scoring errors, model-load errors and startup time. Traffic removal and failed rollouts would need separate Kubernetes tests.
 
 Evidence: evidence/b2_historical/01-08 captures, especially 03_diagnosis, 05_fault_injected_hardened_code and 07_probe_cost; supplemental/results.json, b2 section.
 
 
 <!-- page break -->
 
-# B3: material drift, limited model-quality evidence
+# B3: checking drift and model performance
 
-## Hypothesis partly rejected
+## Why we partly rejected our hypothesis
 
-The initial hypothesis linked wider spreads to detectable spread_normalized drift and a consequential model effect. Its stated rejection rule included drift with an unaffected model. Detection is supported; demonstrated degradation is not. We therefore partly reject the original combined hypothesis. An investigation is still warranted because an input contract changed substantially and this small synthetic test cannot establish safety.
+We expected wider spreads to cause drift in spread_normalized and affect the model. Our original rejection rule included the case where drift appeared but the model was unaffected. We detected drift, but we did not show clear model degradation, so our hypothesis was partly rejected. We still recommend investigating because the inputs changed substantially and this small synthetic test cannot show that the change is harmless.
 
-## Resolve the spread measurement
+## Was the spread change 4x or 5x?
 
-Both input files contain 782 raw messages and 653 feature rows, computed with the same featurizer. Mean normalized spread rises 3.9792x; mean raw spread rises 3.9792x. The first tick changes from 0.01 to 0.05 (5x), but per-tick ratios vary approximately 3x-5x. Thus 5x is an example, not the aggregate change.
+We used the same featurizer on both files. Each had 782 raw messages and 653 feature rows. Mean normalized spread increased 3.9792x, and mean raw spread increased 3.9792x. The first tick changed from 0.01 to 0.05, which is 5x, but the ratios across ticks ranged from about 3x to 5x. This explains the slide discrepancy: the average change was about 4x, while the example was 5x.
 
 | Feature | KS statistic | Interpretation |
 | --- | --- | --- |
@@ -117,13 +117,13 @@ Both input files contain 782 raw messages and 653 feature rows, computed with th
 | order_book_imbalance | 0.0000 | Unchanged |
 | trade_intensity | 0.0000 | Unchanged |
 
-Direct SciPy KS calculations independently corroborate the presentation's feature-level finding. Spread p-value is below numerical precision; other p-values are 1. Serial dependence limits literal significance interpretation. One of four features shifted; a 50% dataset-level rule can miss this consequential single-feature change.
+We used SciPy to check the KS results from the presentation. The spread p-value was too small to represent numerically; the other p-values were 1. Since the rows are time-dependent, we put more weight on the size of the change than the p-value. Only one of four features changed substantially, so the 50% dataset-level rule could miss the spread change.
 
-## New, reproducible model-sensitivity evaluation
+## Testing a new model on the two inputs
 
-The original slide model is unavailable. We fit a new balanced logistic regression and scaler on the first 371 rows, purging 20 rows before the 60% training boundary. Test indices 522-632 provide 111 paired rows after removing the unlabeled 20-row tail. Proxy labels use forward 20-row return volatility and a reference-wide 90th-percentile cutoff, held fixed across the synthetic perturbation; 19 test labels are positive.
+We did not have the original model from the slides, so we fitted a new balanced logistic regression and scaler on the first 371 rows. We left a 20-row gap before the 60% training boundary. The test set used rows 522-632, giving 111 paired rows after removing the last 20 rows without future labels. We labeled spikes using forward 20-row return volatility and the reference-wide 90th percentile. We kept these labels fixed for both inputs; 19 test rows were positive.
 
-This label definition is retrospective, not prospective validation. A cutoff estimated only from training gives zero positive test cases. Trade prices are identical, but bid/ask rounding slightly perturbs midprice returns (maximum absolute change 9.85e-8). No model or scaler fitting uses test rows.
+These labels use the full reference window, so this is a retrospective comparison. A cutoff based only on training data gave no positive test cases. Trade prices were unchanged, but rounding the bid and ask slightly changed midprice returns (maximum absolute difference 9.85e-8). We did not use test rows to fit the model or scaler.
 
 | Average precision (AP) | Estimate | 95% block-bootstrap interval |
 | --- | --- | --- |
@@ -131,16 +131,16 @@ This label definition is retrospective, not prospective validation. A cutoff est
 | Current | 0.254 | [0.037, 0.576] |
 | Current minus reference | 0.046 | [0.000, 0.163] |
 
-AP is sklearn average_precision_score, commonly called PR-AUC here; it is not trapezoidal PR area. Paired circular moving-block bootstrap: 3,000 attempts, block length 20, 2,732 valid two-class draws. The delta interval includes zero. These are not intervals for the slide's 0.208/0.303 result and do not justify calling that result noise.
+We used sklearn's average_precision_score for AP, which we call PR-AUC here; it is not the trapezoidal area under the PR curve. We tried 3,000 paired circular block-bootstrap samples with block length 20. Of these, 2,732 had both classes. The interval for the difference includes zero. These intervals apply to the new model, not the slides' 0.208/0.303 result, so we cannot label that earlier result as noise.
 
 Evidence: results.json; b3_drift.csv; b3_paired_scores.csv; b3_bootstrap.csv. Block length 10 sensitivity: delta 95% interval [0.000, 0.171], 2,902 valid draws. Intervals omit model-training uncertainty.
 
 
 <!-- page break -->
 
-# Operational actions and tradeoffs
+# What we would monitor and do next
 
-## Threshold sensitivity changes the interpretation
+## Trying different alert thresholds
 
 | Threshold | Alerts: ref / current | Precision: ref / current | Recall: ref / current |
 | --- | --- | --- | --- |
@@ -149,11 +149,11 @@ Evidence: results.json; b3_drift.csv; b3_paired_scores.csv; b3_bootstrap.csv. Bl
 | 0.7 | 72/111 / 70/111 | 0.181 / 0.186 | 0.684 / 0.684 |
 | 0.9 | 0/111 / 0/111 | undefined / undefined | 0.000 / 0.000 |
 
-At 0.5, 90.1% of reference and 88.3% of current rows are flagged: the alert rate is saturated and weak as a standalone quality signal. Recall falls from 0.895 to 0.789 even though AP rises, so 'the model is unaffected' is too strong. At 0.7, rates fall to 64.9% and 63.1%, with equal 0.684 recall. At 0.9 no positives are predicted; precision is undefined. Thresholds are illustrative, not selected using this tiny test tail.
+At 0.5, 90.1% of reference rows and 88.3% of current rows were flagged, so alert rate alone tells us little. Recall fell from 0.895 to 0.789 despite higher AP; saying the model was unaffected was too strong. At 0.7, alert rates were 64.9% and 63.1%, with recall 0.684 in both. At 0.9 there were no alerts. These comparisons explore sensitivity; we did not use them to choose a threshold.
 
-Mean absolute score change is 0.0153. Metric behavior is threshold-dependent and intervals are wide. We observe sensitivity to the perturbation, but cannot establish consistent degradation, equivalence, or improvement in production. Keep serving while investigating; do not automatically retrain from a drift p-value or AP point estimate.
+The mean absolute score change was 0.0153. Results depend on the threshold, and the intervals are wide. We cannot conclude that production performance would be better or worse. We would keep serving while investigating, rather than retrain from a drift p-value or one AP estimate.
 
-## Proposed monitoring and response policy
+## Our suggested monitoring plan
 
 | Signal | Trigger / response | Owner |
 | --- | --- | --- |
@@ -162,50 +162,50 @@ Mean absolute score change is 0.0153. Metric behavior is threshold-dependent and
 | Feature drift | Proposed: KS effect >0.2 AND spread mean ratio >1.5; investigate feed/units and market context. | Model + data owner |
 | Model quality | Collect delayed labels; compare precision/recall and AP with uncertainty and operating cost. | Model owner |
 
-The drift trigger is an operational proposal, not a pre-registered or false-alarm-calibrated threshold. Add window minimums, persistence and deduplication before alerting continuously. Infrastructure health, data validity and model quality must remain separate signals. A per-feature alert is appropriate even if the dataset-wide fraction is below its threshold.
+This drift threshold is a starting point; we have not measured its false-alarm rate. We would set a minimum window size, require persistent changes and avoid duplicate alerts. We would track health, drift and model quality separately, since the dataset rule can miss a large change in one feature.
 
-## Deployment gates
+## Before using these changes in production
 
-B1: preserve source data and use a fresh output path for every run. The current writer can truncate a pre-existing path on restart. Before production, require closed durable segments, an explicit offset/data recovery protocol and kill-during-write/restart tests. Do not infer exactly-once durability from a committed Kafka offset.
+B1: keep the source data and use a fresh output path for each run. The current writer can overwrite an existing file after a restart. Before production, we need closed, durable file segments, a clear plan for recovering data and offsets, and tests that kill the process during a write and then restart it. A committed Kafka offset does not by itself prove the output is safely stored.
 
-B2: release path repair plus readiness after canary-schema review. Provide operator rollback because repeated restart cannot repair a missing model. Validate model identity separately; readiness proves execution, not correctness. Pin tested image digests before production; the starter still uses a mutable Kafka latest tag.
+B2: use the path repair and readiness check after checking that the canary inputs match the model. Keep a rollback procedure because restarting cannot fix a missing model. Check model identity separately: /ready shows that prediction runs, not that it is the intended model. We would also pin tested image digests before production because the starter uses Kafka's latest tag.
 
-B3: investigate source/units, retain both windows and collect labels from an actual wide-spread regime. Retraining requires sustained, consequential labeled degradation and validation of the proposed replacement. Sensitive alerts incur operator load; suppressing a single-feature shift risks overlooking a broken input contract.
+B3: check the data source and units, save both windows, and collect labels from a real period with wider spreads. We would retrain only after finding a sustained, meaningful drop in labeled performance and testing a replacement. Too many drift alerts could waste operators' time, but ignoring a large change in one feature could hide a data problem.
 
 Evidence: b3_thresholds.csv and b3_paired_scores.csv. Proposed operational triggers are recommendations, not tested SLAs or production guarantees.
 
 
 <!-- page break -->
 
-# AI supervision, reproducibility and remaining uncertainty
+# How we used AI and what is still open
 
-## Consequential AI decision 1: replace unverifiable evidence
+## AI example 1: rerunning B1 with better controls
 
-AI proposed replacing the unverifiable B1 slide measurements with new controlled experiments, rather than treating the configured 3,000/s rate and 73,607 lag as established. Disposition: accepted by the submitting team member during final preparation. Reason: 73,607 lag cannot arise from a clean one-pass 14,076-message workload, and the original run mode/offset history cannot be recovered.
+AI suggested replacing the B1 slide numbers we could not verify with new controlled experiments. We accepted this during final preparation. The reason was that a clean, one-pass workload of 14,076 messages could not explain lag of 73,607. We also could not confirm that the configured rate of 3,000/s was achieved without the original logs.
 
-Verification: new unique Kafka topics/groups; 14,076 acknowledged arrivals per run; measured arrival rates; zero backward timestamps; six before/after runs; every one of 11,754 output rows exactly equal to the direct feature reference. A separate randomized file-size experiment isolates storage cost. Missing historical logs remain missing; the new results do not retroactively validate the old charts.
+We checked this recommendation by running six tests with new Kafka topics and groups. Each acknowledged all 14,076 messages, recorded the achieved rate, and had no backward timestamps. All 11,754 feature rows matched the direct calculation exactly. We also timed saves at fixed file sizes. These tests gave us evidence for the final report, but they do not recover or validate the missing original runs.
 
-## Consequential AI decision 2: restrict the B1 recommendation
+## AI example 2: changing our B1 recommendation
 
-AI proposed modifying 'ship append with a shutdown handler' to conditional use pending durable storage and recovery. Disposition: accepted by the submitting team member after reviewing the SIGKILL result. Reason: a graceful close handler cannot run under SIGKILL, and the open file's missing footer makes the entire file unreadable through the normal reader.
+AI also suggested changing our recommendation from 'ship append with a shutdown handler' to using it only where replay is possible until durability is fixed. We accepted this after reviewing the SIGKILL result. A normal shutdown handler cannot run after SIGKILL, and without the footer the open Parquet file cannot be read normally.
 
-Verification: the harness completed 40 batches (1,000 rows), then delivered actual Linux SIGKILL. Rewrite retained 1,000 readable rows; append retained zero. The brief distinguishes this writer-level result from unmeasured Kafka recovery loss and withdraws the old blanket 'crash-safe every flush' claim. The team retains responsibility for the deployment decision and interpretation.
+We checked this with a test that completed 40 batches (1,000 rows) and then sent Linux SIGKILL. The rewrite file had 1,000 readable rows; the append file had none. We changed our recommendation and removed the claim that the old method was always crash-safe. This test checked file readability, not recovery of committed Kafka data. We are responsible for explaining that difference and for the final recommendation.
 
-## How the working artifact can be checked
+## How to repeat our tests
 
-From the repository root, install experiments/requirements.txt under Python 3.12 and run experiments/validate_submission.py. Start the supplied Kafka broker and run experiments/stream_comparison.py --rate 1500. On Linux, run validate_submission.py --crash for SIGKILL. The root README includes Docker commands, B2 fault injection and repair, environment details and expected outputs.
+To repeat the tests, install experiments/requirements.txt with Python 3.12 and run experiments/validate_submission.py from the repository root. Start the Kafka broker and run experiments/stream_comparison.py --rate 1500 for the streaming comparison. On Linux, run validate_submission.py --crash for the kill test. The README has the Docker setup, B2 fault test and expected outputs.
 
-Scripts, input hashes, raw trial CSVs, lag telemetry, worker logs, paired scores and bootstrap samples are included. B2 captures remain dated September 25; supplemental evidence is dated October 10. The original baseline is retained in the supplied challenge package and initial Git commit. The PDF and editable text summarize evidence; they are not substitutes for the raw outputs.
+We included the scripts, input hashes, trial results, lag logs, paired scores and bootstrap samples. The older B2 logs are dated September 25, and the new tests are dated October 10. The original code is available in the challenge package and initial commit. The evidence files contain the details behind the tables in this report.
 
-## Most important remaining uncertainty
+## Our main unanswered question
 
-Can the faster B1 pipeline preserve or recover all committed output after a hard failure and restart? Until a durable-write/offset protocol is implemented and tested, the observed throughput benefit does not establish production reliability. Separately, B3 needs representative delayed labels: synthetic paired inputs and retrospective proxy labels cannot tell us whether the system remains useful in a real wide-spread regime.
+Our biggest remaining question is whether the faster B1 pipeline can recover all committed output after a crash and restart. The speed improvement is useful, but we cannot call it production-ready until we test a reliable way to save data and commit offsets. For B3, we still need labels from a real wide-spread period. The synthetic input change and retrospective labels cannot tell us how useful the model would be there.
 
-## Sources and supporting material
+## Sources and supporting files
 
-Assignment: 94-879 Final Team Project Track B - Technical Challenges, Final Deliverables (six-page brief limit). Team presentation: When Healthy Isn't Working, October presentation; numerical discrepancies are corrected here. Instructor's post-presentation feedback motivates the supplemental tests. Repository: vanshika1631/OpsAI_TrackB, initial commit eae698f. Internal evidence index: evidence/README.md. Feedback closure: submission/feedback_response.md.
+We used the assignment, 94-879 Final Team Project Track B - Technical Challenges, and the professor's feedback to plan the final tests. This report updates the results in our presentation, When Healthy Isn't Working. Our repository is vanshika1631/OpsAI_TrackB (initial commit eae698f). Details about the evidence are in evidence/README.md, and our response to each feedback item is in submission/feedback_response.md.
 
-AI decisions recorded in the final-preparation conversation: user explicitly accepted both recommendations. No unavailable historical AI advice or verification is invented.
+These examples come from the final-preparation work. Both recommendations were accepted in that discussion.
 
 
 <!-- page break -->
